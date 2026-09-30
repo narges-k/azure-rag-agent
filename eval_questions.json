@@ -1,0 +1,5 @@
+[
+  {"question": "REPLACE with a question your document clearly answers", "expected_source": "your-file.pdf"},
+  {"question": "REPLACE with another question from a different file", "expected_source": "another-file.pdf"},
+  {"question": "REPLACE with a question your documents do NOT answer (the system should say it doesn't know)", "expected_source": null}
+]

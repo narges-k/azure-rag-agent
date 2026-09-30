@@ -1,0 +1,7 @@
+openai>=1.60
+azure-identity
+azure-search-documents>=11.6
+azure-storage-blob
+pypdf
+python-dotenv
+requests
