@@ -1,74 +1,65 @@
 # azure-rag-agent
 
-A small, readable RAG (retrieval-augmented generation) pipeline on Azure, with an agent on top and a
-built-in evaluation script. Documents go into Blob Storage, get chunked and embedded, and are indexed in
-Azure AI Search. Questions are answered with hybrid retrieval and cited sources.
+A small RAG (retrieval-augmented generation) project on Azure, with a simple agent and an evaluation script.
 
-The language models can come from **Azure OpenAI** or from a **local Ollama server**, so the project also
-works without Azure OpenAI quota. Authentication uses **Microsoft Entra ID** (`az login`). There are no API keys
-in the code or in the configuration.
+You put documents in, ask questions, and get answers with sources. The models can run on **Azure OpenAI**
+or locally with **Ollama**. Login uses `az login`, so there are no API keys in the code.
 
-## Architecture
+- Ollama is enough for small project. You should install first and download LLM model and embedded model and use them.
+- For using Azure services freely, you can create a free trial version easily.
+
+## How it works
 
 ```
-docs/*.pdf|txt|md
-   -> Azure Blob Storage            (upload_docs.py)
-   -> text extraction + chunking    (ingest.py, chunking.py)
-   -> embeddings                    (Azure OpenAI or Ollama)
-   -> Azure AI Search index         (BM25 + vector HNSW + optional semantic ranker)
-   -> hybrid retrieval              (ask.py)
-   -> LLM answer with [1], [2] citations
-   -> evaluation: hit@k, MRR, groundedness   (evaluate.py)
-   -> agent: the model decides when and what to search   (agent.py)
+documents -> Blob Storage -> split into chunks -> embeddings -> Azure AI Search index
+question  -> search the index (keyword + vector) -> LLM answers with sources [1], [2]
 ```
 
-| File | Purpose |
+| File | What it does |
 |---|---|
-| `upload_docs.py` | Uploads local files from `docs/` to a Blob container |
-| `ingest.py` | Reads blobs, extracts text, chunks (about 1200 characters, 200 overlap), embeds, indexes |
-| `ask.py` | Hybrid search (keyword + vector, optional semantic reranking), then a cited answer |
-| `agent.py` | Tool-calling loop with a `search_documents` tool, step limit and numbered citations |
-| `evaluate.py` | Retrieval metrics (hit@k, MRR) and an optional LLM judge for groundedness |
-| `common.py` | Configuration and Azure/OpenAI/Ollama clients |
-| `chunking.py` | Paragraph-aware chunking with overlap (pure Python, no Azure needed) |
+| `upload_docs.py` | Uploads files from `docs/` to Blob Storage |
+| `ingest.py` | Splits the text into chunks, creates embeddings, saves them in Azure AI Search |
+| `ask.py` | Searches the index and answers with sources |
+| `agent.py` | An agent that decides when to search, and can search more than once |
+| `evaluate.py` | Measures search quality (hit@k, MRR) and answer quality (groundedness) |
+| `chunking.py` | Splits text into chunks |
+| `common.py` | Settings and connections to Azure and Ollama |
 
-## Prerequisites
+## What you need
 
-- Python 3.10+
-- An Azure subscription with: a Storage account, an Azure AI Search service, and (optionally) Azure OpenAI
-- [Azure CLI](https://learn.microsoft.com/cli/azure/) and `az login` with the account that owns the resources
-- Optional: [Ollama](https://ollama.com) with `llama3.2` and `nomic-embed-text` pulled
+- Python 3.10 or newer
+- Azure: a Storage account and an Azure AI Search service (and Azure OpenAI if you use it)
+- [Azure CLI](https://learn.microsoft.com/cli/azure/), then run `az login`
+- Optional: [Ollama](https://ollama.com) with `llama3.2` and `nomic-embed-text`
 
-### Roles (RBAC) for the signed-in user
+Roles you need on your Azure account:
 
 | Resource | Role |
 |---|---|
 | Storage account | Storage Blob Data Contributor |
 | Azure AI Search | Search Service Contributor, Search Index Data Contributor, Search Index Data Reader |
-| Azure OpenAI (if used) | Cognitive Services OpenAI User |
+| Azure OpenAI | Cognitive Services OpenAI User |
 
-Role assignments can take up to about 10 minutes to take effect. Note that "Owner" does not grant data-plane
-access to Search or Blob data.
+New roles can take about 10 minutes to start working.
 
 ## Setup
 
 ```bash
-git clone https://github.com/<your-user>/azure-rag-agent.git
+git clone https://github.com/narges-k/azure-rag-agent.git
 cd azure-rag-agent
 python -m venv .venv
-# Windows: .venv\Scripts\activate      macOS/Linux: source .venv/bin/activate
+.venv\Scripts\activate          # Windows (macOS/Linux: source .venv/bin/activate)
 pip install -r requirements.txt
-cp .env.example .env      # then edit .env with your resource names
+copy .env.example .env          # macOS/Linux: cp .env.example .env
 az login
 ```
 
-### Option A: Azure OpenAI
+Then open `.env` and fill in your resource names.
 
-Fill in `AZURE_OPENAI_ENDPOINT` (the base URL only, for example `https://<name>.openai.azure.com`) and the
-names of your chat and embedding **deployments**. Set `EMBED_DIMENSIONS` to match the embedding model
-(1536 for `text-embedding-3-small`).
+**Using Azure OpenAI:** set the endpoint (base URL only) and your chat and embedding deployment names.
+Set `EMBED_DIMENSIONS=1536` for `text-embedding-3-small`.
 
-### Option B: local Ollama
+**Using Ollama instead:**
 
 ```
 LLM_PROVIDER=ollama
@@ -78,51 +69,40 @@ EMBED_DIMENSIONS=768
 AZURE_SEARCH_INDEX=rag-demo-ollama
 ```
 
-Use a separate index name whenever the embedding dimension changes.
+Use a new index name whenever the embedding size changes.
 
-## Usage
+## Run it
 
-Put **public** documents (PDF, TXT or MD) into `docs/`, then:
+Put some **public** documents (PDF, TXT or MD) in the `docs/` folder, then:
 
 ```bash
-python upload_docs.py                       # 1. upload to Blob Storage
-python ingest.py                            # 2. chunk, embed, index (safe to re-run: ids are deterministic)
-python ask.py "What does the report say about X?"          # 3. ask, add --semantic for reranking
-python agent.py "Compare what A and B say about X" -v      # 4. agent, several searches per question
-python evaluate.py --k 5 --judge            # 5. measure quality
+python upload_docs.py                                   # 1. upload
+python ingest.py                                        # 2. index (safe to run again)
+python ask.py "What does the report say about X?"       # 3. ask a question
+python agent.py "Compare A and B on X" -v               # 4. use the agent
+python evaluate.py --k 5 --judge                        # 5. measure quality
 ```
 
-### Evaluation
+### Why evaluating a RAG system is hard
 
-Edit `eval_questions.json`: each item has a `question` and the `expected_source` file that should be
-retrieved (use `null` for a question the documents do not answer). `evaluate.py` reports:
+Evaluating a RAG system is challenging, because there are several parts that can fail, and a good score on
+one part does not mean the whole system is good. We need to look at different aspects:
 
-- **hit@k**: the share of questions where the expected source is in the top k results
-- **MRR**: mean reciprocal rank of the first correct source
-- **groundedness** (with `--judge`): an LLM grades whether the answer is supported by the retrieved sources
+- **Retrieval:** does the search find the right passages? (hit@k, MRR)
+- **Answer quality:** is the answer correct, complete and based on the sources? (groundedness)
+- **Missing answers:** does the system say "I don't know" when the documents have no answer?
+- **Speed and cost:** how long does an answer take, and how many tokens does it use?
+- **Test data:** a few questions are not enough. The results depend on which questions we choose.
 
-Change one variable at a time (chunk size, `k`, `--semantic`) and compare. A chunk-size experiment needs a
-new index name.
+This project only measures the first two parts. Good next steps are more test questions, a larger
+document set, and human review of a sample of the answers.
 
-## Design notes
+## Good to know
 
-- **Hybrid retrieval**: BM25 keyword search and vector search are combined by the service (reciprocal rank fusion).
-- **Grounding**: the prompt allows only the retrieved sources and requires citations. "I don't know" is an accepted answer.
-- **Prompt injection**: retrieved text is treated as untrusted data in the system prompt.
-- **Agent guardrails**: a maximum number of steps, and a forced final answer when the budget runs out.
-- **Idempotent ingestion**: chunk ids are hashes of file, page and chunk number, so re-runs do not create duplicates.
+- The answer uses only the retrieved sources and must cite them. "I don't know" is allowed.
+- Retrieved text is treated as untrusted, to reduce prompt injection.
+- The agent has a step limit, so it cannot loop forever.
+- Running `ingest.py` again does not create duplicates.
 
-## Security and data
-
-- Never commit `.env`. It is in `.gitignore`.
-- Use public or synthetic documents only. Do not index confidential or employer data in a personal or university subscription.
-- Uploaded documents are in `docs/`, which is ignored by git except for a placeholder.
-
-## Cost and cleanup
-
-Azure AI Search has a fixed hourly cost while the service exists. Delete the resource group when you are
-done experimenting:
-
-```bash
-az group delete --name <resource-group>
+te --name <resource-group>
 ```
