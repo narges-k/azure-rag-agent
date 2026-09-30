@@ -8,11 +8,6 @@ The language models can come from **Azure OpenAI** or from a **local Ollama serv
 works without Azure OpenAI quota. Authentication uses **Microsoft Entra ID** (`az login`). There are no API keys
 in the code or in the configuration.
 
-> **Status: work in progress.** Chunking, blob upload, index creation and embedding with a local Ollama model
-> have been run. Retrieval, the agent and the evaluation are still being validated end to end, and the agent
-> loop has so far only been tested with a mock model. Expect small first-run issues (deployment names,
-> role assignments).
-
 ## Architecture
 
 ```
